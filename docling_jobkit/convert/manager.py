@@ -51,6 +51,7 @@ from docling.document_converter import (
 from docling.models.factories import (
     get_layout_factory,
     get_ocr_factory,
+    get_picture_description_factory,
     get_table_structure_factory,
 )
 
@@ -1024,6 +1025,27 @@ class DoclingConverterManager:
             # If it's a dict, convert it to PictureDescriptionVlmEngineOptions
             if isinstance(request.picture_description_custom_config, dict):
                 config_dict = request.picture_description_custom_config.copy()
+
+                # Plugin escape hatch: when the dict's "kind" matches a factory-
+                # registered picture description engine that isn't part of the
+                # built-in VlmEngine framework (e.g. a plugin's own model with
+                # its own loader), build that plugin's options class directly so
+                # the factory can dispatch by kind. Without this, every dict
+                # gets forced into PictureDescriptionVlmEngineOptions and any
+                # plugin-registered options class becomes unreachable from a
+                # request.
+                kind = config_dict.get("kind")
+                if kind is not None and kind not in (
+                    PictureDescriptionVlmEngineOptions.kind,
+                    "vlm",
+                    "api",
+                ):
+                    factory = get_picture_description_factory(
+                        allow_external_plugins=self.config.allow_external_plugins
+                    )
+                    if kind in factory.registered_kind:
+                        payload = {k: v for k, v in config_dict.items() if k != "kind"}
+                        return factory.create_options(kind, **payload)
 
                 if self.config.allowed_picture_description_engines is not None:
                     engine_options_dict = config_dict.get("engine_options", {})
